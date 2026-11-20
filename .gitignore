@@ -1,0 +1,28 @@
+# Data (large CSVs, status table snapshots): not committed
+input_data/
+output_data/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# Editors
+.vscode/
+.idea/
+code_db_id(wfm)/
+
+# db_push dry-run previews
+db_push/dry_run_output/
+
+# Local files: not committed
+data/
+linux_output.txt
