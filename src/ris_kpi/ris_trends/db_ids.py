@@ -8,7 +8,7 @@
 created_at / updated_at are set when the rows are appended (ris_trends/append.py).
 
 Every lookup is de-duplicated on its key (first row kept, logged), so the joins never add rows. Rows whose id is not
-found are logged and, with DROP_ROWS_WITHOUT_IDS, dropped.
+found are logged and, with DROP_ROWS_WITHOUT_IDS (.env), dropped.
 """
 import logging
 import uuid
@@ -87,9 +87,12 @@ def add_db_ids(df, db_tables):
     return df.drop(columns=["_upc", "_src", "_phase", "_cycle", "_date"])
 
 
-def drop_rows_without_ids(df):
+def drop_rows_without_ids(df, drop=True):
+    """Rows with an empty upc_id / survey_id / survey_source_id: dropped (drop=True) or kept (drop=False); logged
+    either way."""
     missing = df[REQUIRED_IDS].isna().any(axis=1)
     if missing.any():
-        log.warning("Dropped %s / %s rows with an empty %s:\n%s", int(missing.sum()), len(df), " / ".join(REQUIRED_IDS),
+        log.warning("%s %s / %s rows with an empty %s:\n%s", "Dropped" if drop else "Kept (DROP_ROWS_WITHOUT_IDS=False)",
+                    int(missing.sum()), len(df), " / ".join(REQUIRED_IDS),
                     df.loc[missing, SURVEY_KEYS + REQUIRED_IDS].drop_duplicates(SURVEY_KEYS).to_string(index=False))
-    return df[~missing].reset_index(drop=True)
+    return df[~missing].reset_index(drop=True) if drop else df.reset_index(drop=True)

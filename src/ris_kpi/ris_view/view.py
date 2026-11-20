@@ -64,9 +64,7 @@ def run(mode=UPDATE, surveys=None, run_time=None):
     rows = build_view(tables, intermediate, project)
 
     # --- 4. DB ids ---
-    rows = add_db_ids(rows, db_tables)
-    if cfg.DROP_ROWS_WITHOUT_IDS:
-        rows = drop_rows_without_ids(rows)
+    rows = drop_rows_without_ids(add_db_ids(rows, db_tables), drop=cfg.DROP_ROWS_WITHOUT_IDS)
     fresh = as_text(finalize(rows.assign(created_at=run_time, updated_at=run_time)))
     log.info("ris_view_data of this run — %s rows × %s cols", f"{len(fresh):,}", fresh.shape[1])
 

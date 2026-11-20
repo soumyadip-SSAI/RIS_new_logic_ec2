@@ -19,7 +19,7 @@ from `RIS_View_new_logic_modular` / `RIS_Trends_new_logic_modular`:
 |---|---|---|
 | `ris-kpi run` | Full KPI creation (new survey data / silver tables) | everything below |
 | `ris-kpi status-update` | Only defect statuses changed in the DB (cases closed, assigned, ...) | silver with status, `intermediate_10m_data`, `ris_view_data` |
-| `ris-kpi sync-db-ids` | Manually, after every run: take `id` / `created_at` of rows already in the DB | `Latest/ris_view_data.csv`, `Latest/ris_trends_data.csv` |
+| `ris-kpi sync-db-ids` | Manually, after every run: take `id` / `created_at` of rows already in the DB | `ris_view_data.csv`, `ris_trends_data.csv` in `Latest/` and in the newest `year=/month=/day=` folder |
 
 The tables are **updated, not rebuilt**: each run reads the newest saved copy of every table first and inserts /
 updates rows in it (see [New and existing surveys](#new-and-existing-surveys-scenario-1--2)).
@@ -38,12 +38,21 @@ Silver layout: every file named `<table>.csv`, `.parquet` or `.xlsx` in the scop
 DHMS/NSV/Silver/Zone=B/Phase=1/Cycle=1/UPC=N_01002_01001_GJ/dlm_kpi_new/master_cracking_10m.parquet
 ```
 
-**Run scope.** `SILVER_SCOPE` in `config.py` chooses which `Zone=` / `Phase=` / `Cycle=` / `UPC=` folders a run reads:
-- **Default:** Zone B, Phase 1, Cycle 1, N/01002/01001/GJ.
-- **Empty value:** every folder of that level.
-- **Command line:** `--zone`, `--phase`, `--cycle`, `--upc` override it, and `--all-upcs` reads every folder.
-- **Listing:** only the folder fixed by the scope is listed on S3.
-- **Other surveys:** a scoped run reads and changes only its own survey's rows in the gold tables. Rows of other surveys saved there stay as they are.
+**Run scope.** Which `Zone=` / `Phase=` / `Cycle=` / `UPC=` folders a run reads:
+Set in **`.env`** in the repository root, as shown in the settings section below.
+- **`CONSIDER_UPC_LIST=True`** (default): only the surveys listed in **`upc_to_run.csv`** in the repository root, or in the file named by `UPC_LIST_FILE`.
+  - Columns: `upc`, `phase`, `cycle`, `zone`, in any order, one row per survey folder.
+  - UPCs can be in `/` or `_` form.
+  - An empty cell means every folder of that level.
+- **`CONSIDER_UPC_LIST=False`:** every Zone / Phase / Cycle / UPC folder under `Silver/`.
+- **Command line overrides:**
+  - `--upc-list other.csv` reads another list.
+  - `--all-upcs` reads every folder.
+  - `--zone/--phase/--cycle/--upc` picks one survey; a level that isn't given means every folder.
+- **Log:** the first lines list the survey folders of the run.
+- **Missing files:** a listed survey with no file for a table is a warning in the log. A table with no file at all is an error.
+- **Listing:** only the folders fixed by the listed surveys are listed on S3.
+- **Other surveys:** a run reads and changes only the listed surveys' rows in the gold tables. Rows of other surveys saved there stay as they are.
 
 Tables used:
 - **Line defects:** `master_roughness_{parent,as_per_ca,child_10m}`, `master_rutting_{parent,as_per_ca,child_10m}`.
@@ -89,18 +98,39 @@ git pull
 python3 -m venv .venv                           # first time only
 source .venv/bin/activate
 pip install -e .
-nohup ris-kpi run > run_$(date +%F_%H%M).log 2>&1 &   # scope: config.SILVER_SCOPE (or --zone/--phase/--cycle/--upc)
+nano .env                                       # settings: CONSIDER_UPC_LIST, UPC_LIST_FILE, ...
+nohup ris-kpi run > run_$(date +%F_%H%M).log 2>&1 &   # surveys of upc_to_run.csv (CONSIDER_UPC_LIST)
 tail -f run_*.log                               # Ctrl+C stops watching, not the run
 ```
 
 The run ends with a summary (`OK` / `FAILED` / `SKIPPED` per step); exit code 1 means something failed.
 
+## Settings (`.env`)
+
+Run settings live in `.env` in the repository root.
+- **Committed:** it holds the run settings and the `db_push` DB keys (`DB_HOST`, `DB_PASSWORD`, …). The DB keys are committed **empty**: fill them in on the server only and run `git update-index --skip-worktree .env` so they are never committed (see `db_push/README.md`).
+- **Editing:** use `nano .env` on the server. No reinstall is needed.
+- **Server edits and `git pull`:** if the repository's `.env` changed too, pull stops. Run `git checkout -- .env` to drop the local edit, or `git stash` then `git pull` then `git stash pop` to keep it.
+- **Defaults:** without `.env`, the defaults below apply.
+- **Environment variables:** one with the same name, such as `CONSIDER_UPC_LIST=False ris-kpi run`, wins over the `.env` value for that run.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `RIS_KPI_STORAGE` | `s3` | `s3`: read and write S3 (EC2). `local`: `input_data/` and `output_data/` in the repository |
+| `CONSIDER_UPC_LIST` | `True` | `True`: only the surveys in `UPC_LIST_FILE`. `False`: every silver folder |
+| `UPC_LIST_FILE` | `upc_to_run.csv` | survey list (`upc`, `phase`, `cycle`, `zone`), relative to the repository root or absolute |
+| `DROP_ROWS_WITHOUT_IDS` | `True` | `ris_view_data` and `ris_trends_data` rows with an empty `upc_id`, `survey_id` or `survey_source_id`. `True`: dropped. `False`: kept with the empty ids. Logged either way |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SCHEMA` | empty, `5432`, `public` | `db_push` credentials, filled in on the server only (see `db_push/README.md`) |
+
+The first log line shows the settings used, for example `Settings: .../.env | RIS_KPI_STORAGE=s3 | CONSIDER_UPC_LIST=True | ...`.
+
 ## Commands
 
 ```bash
-ris-kpi run                      # ris_view -> ris_trends, for config.SILVER_SCOPE
-ris-kpi run --zone B --phase 1 --cycle 1 --upc N/01002/01001/GJ   # one survey folder
+ris-kpi run                      # ris_view -> ris_trends, for upc_to_run.csv (or every folder: CONSIDER_UPC_LIST=False in .env)
+ris-kpi run --upc-list other.csv # the surveys of another CSV (upc, phase, cycle, zone)
 ris-kpi run --all-upcs           # every Zone / Phase / Cycle / UPC folder
+ris-kpi run --zone B --phase 1 --cycle 1 --upc N/01002/01001/GJ   # one survey folder
 ris-kpi run --keep-going         # still run ris_trends when ris_view fails
 ris-kpi status-update            # only defect statuses changed: the RIS view (scenario 2, or 1 when a survey is new)
 ris-kpi ris-view --step view     # single steps (silver-status, intermediate, view), UPDATE mode for all surveys
@@ -167,7 +197,7 @@ One row per survey, defect type (plus `Total`), pavement group and status (`open
   | `defect_type_id` | `master_defect_type` | survey_system + asset_type + defect_name (as before; Rutting `PAVEMENT`, else `Flexible Pavement`; `Total`: none) |
   | `id` | — | a random uuid4 per row, set on INSERT and kept by UPDATE runs |
 
-  Rows with an empty `upc_id`, `survey_id` or `survey_source_id` are **dropped** and logged (`RisView.DROP_ROWS_WITHOUT_IDS`).
+  Rows with an empty `upc_id`, `survey_id` or `survey_source_id` are **dropped** and logged (`DROP_ROWS_WITHOUT_IDS=True` in `.env`; `False` keeps them with the empty ids, for ris_view_data and ris_trends_data).
 - **Columns:**
   `id, survey_source_id, upc, upc_id, phase, cycle, defect_detected_on, survey_id, defect_type, defect_type_id, pavement_type, status, upc_length_km, upc_lane_length_km, total_defects_ca, affected_length_ca_m, affected_length_ca_km, created_at, updated_at`.
 
@@ -218,7 +248,13 @@ Run it by hand after every `ris-kpi run`. It compares two sets of tables:
 - **run_data:** the newest `ris_view_data` / `ris_trends_data`;
 - **kpi_data:** the DB exports `ris_view_kpi` / `ris_trends_kpi` in `NSV/DHMS/DIC_Staging/Latest/`.
 
-A run_data row whose key matches a kpi_data row takes that row's `id` and `created_at`. Only the `Latest/` files are overwritten, with the same names.
+A run_data row whose key matches a kpi_data row takes that row's `id` and `created_at`.
+
+Two copies of each table are synced, each on its own rows, and overwritten in place with the same names:
+- **`Latest/`:** the copy that `db_push` reads.
+- **The newest `year=/month=/day=` copy:** the one the next `ris-kpi run` reads, so the DB ids carry into the next run.
+
+Older dated copies are history and are not touched.
 
 | Table | Key |
 |---|---|

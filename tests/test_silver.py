@@ -1,10 +1,10 @@
-"""Silver tables of the new layout: every UPC folder read and stacked, locally and on S3."""
+"""Silver tables of the new layout: every UPC folder read and stacked, locally and on S3; run scope / upc_to_run.csv."""
 import pandas as pd
 
 import pytest
 
 from ris_kpi import cli, config
-from ris_kpi.common.silver import find_silver_files, keep_scope, load_silver, scope_folders
+from ris_kpi.common.silver import find_silver_files, keep_scope, load_silver, read_upc_list, scope_folders
 
 ALL = {"Zone": "", "Phase": "", "Cycle": "", "UPC": ""}
 
@@ -27,6 +27,7 @@ def test_load_silver_stacks_every_upc_folder(tmp_path):
     assert set(df["pavement_type"]) == {"Cement Concrete", "Asphalt"}   # spelling unified
     assert df["extra"].isna().sum() == 1                                 # column missing in one file: empty
     assert load_silver(tmp_path, "master_pothole", keep_upcs=["N/2"], scope=ALL)["upc"].tolist() == ["N/2"]
+    assert load_silver(tmp_path, "master_pothole")["upc"].nunique() == 2   # default scope in tests: every folder
     # scope: only the folders of one survey
     one = {"Zone": "B", "Phase": "1", "Cycle": "1", "UPC": "N/2"}
     assert load_silver(tmp_path, "master_pothole", scope=one)["upc"].tolist() == ["N/2"]
@@ -44,6 +45,8 @@ def test_load_silver_on_s3(fake_s3):
     assert sorted(df["upc"]) == ["N/1", "N/2"] and list(df.columns) == ["upc", "phase", "cycle", "detected_on"]
     one = load_silver(root, "master_pothole", scope={"Zone": "B", "Phase": "1", "Cycle": "1", "UPC": "N_2"})
     assert one["upc"].tolist() == ["N/2"]
+    both = [{"Zone": "B", "Phase": "1", "Cycle": "1", "UPC": "N_2"}, {"Zone": "B", "Phase": "2", "Cycle": "1", "UPC": "N/1"}]
+    assert sorted(load_silver(root, "master_pothole", scope=both)["upc"]) == ["N/1", "N/2"]
 
 
 def test_scope_folders_and_keep_scope():
@@ -53,11 +56,65 @@ def test_scope_folders_and_keep_scope():
                          "cycle": ["1", "1", "1"]})
     assert keep_scope(gold, {"Zone": "B", "Phase": "1", "Cycle": "1", "UPC": "N_2"})["zone"].tolist() == ["B"]
     assert len(keep_scope(gold, {"Zone": "", "Phase": "1", "Cycle": "", "UPC": ""})) == 3
+    assert len(keep_scope(gold)) == 3                                    # default scope in tests: every folder
 
 
-def test_cli_scope_options(monkeypatch):
-    monkeypatch.setattr(config, "SILVER_SCOPE", {"Zone": "B", "Phase": "1", "Cycle": "1", "UPC": "N/1"})
-    cli.apply_scope(cli._build_parser().parse_args(["run", "--upc", "N/9", "--phase", "2"]))
-    assert config.SILVER_SCOPE == {"Zone": "B", "Phase": "2", "Cycle": "1", "UPC": "N/9"}
-    cli.apply_scope(cli._build_parser().parse_args(["ris-trends", "--all-upcs"]))
-    assert config.SILVER_SCOPE == ALL
+# header with a trailing space, CRLF line ends, '2.0', '_' form, a duplicate (N_2 = N/2) and an empty row
+UPC_LIST = "upc,cycle,phase,zone \r\nN/1,1,2.0,B\r\nN_2,1,1,B\r\nN/2,1,1,B\r\n,,,\r\n"
+
+
+def test_upc_list_file(tmp_path, monkeypatch):
+    listed = tmp_path / "upc_to_run.csv"
+    listed.write_bytes(UPC_LIST.encode())
+    scopes = read_upc_list(listed)
+    assert scopes == [{"Zone": "B", "Phase": "2", "Cycle": "1", "UPC": "N/1"},
+                      {"Zone": "B", "Phase": "1", "Cycle": "1", "UPC": "N/2"}]
+
+    silver = tmp_path / "silver"
+    for folder in ("Zone=B/Phase=2/Cycle=1/UPC=N_1", "Zone=B/Phase=1/Cycle=1/UPC=N_2", "Zone=A/Phase=1/Cycle=1/UPC=N_3"):
+        (silver / folder).mkdir(parents=True)
+        (silver / folder / "master_pothole.csv").write_text(f"id,upc,phase,cycle\n1,{folder.split('UPC=')[1]},1,1\n")
+    monkeypatch.setattr(config, "UPC_LIST_FILE", listed)
+    monkeypatch.setattr(config, "CONSIDER_UPC_LIST", True)
+    assert sorted(load_silver(silver, "master_pothole")["upc"]) == ["N/1", "N/2"]          # only the listed surveys
+    monkeypatch.setattr(config, "CONSIDER_UPC_LIST", False)
+    monkeypatch.setattr(config, "SILVER_SCOPE", None)
+    assert sorted(load_silver(silver, "master_pothole")["upc"]) == ["N/1", "N/2", "N/3"]   # every folder
+
+    gold = pd.DataFrame({"upc": ["N/1", "N/2", "N/3"], "zone": ["B", "B", "A"], "phase": ["2", "1", "1"],
+                         "cycle": ["1", "1", "1"]})
+    assert keep_scope(gold, scopes)["upc"].tolist() == ["N/1", "N/2"]
+
+    # a listed survey without the file: warning, the others are read; none at all: error
+    extra = scopes + [{"Zone": "C", "UPC": "N/9"}]
+    assert load_silver(silver, "master_pothole", scope=extra)["upc"].nunique() == 2
+    with pytest.raises(FileNotFoundError, match="Zone=C"):
+        load_silver(silver, "master_pothole", scope=[{"Zone": "C", "UPC": "N/9"}])
+    (tmp_path / "bad.csv").write_text("upc,phase\nN/1,1\n")
+    with pytest.raises(ValueError, match="cycle"):
+        read_upc_list(tmp_path / "bad.csv")
+    (tmp_path / "empty.csv").write_text("upc,phase,cycle,zone\n")
+    with pytest.raises(ValueError, match="no survey"):
+        read_upc_list(tmp_path / "empty.csv")
+    with pytest.raises(FileNotFoundError):
+        read_upc_list(tmp_path / "none.csv")
+
+
+def test_cli_scope_options(tmp_path, monkeypatch):
+    parse = cli._build_parser().parse_args
+    cli.apply_scope(parse(["run", "--upc", "N_9", "--phase", "2"]))      # one survey, other levels: any folder
+    assert config.SILVER_SCOPE == [{"Zone": "", "Phase": "2", "Cycle": "", "UPC": "N/9"}]
+    cli.apply_scope(parse(["ris-trends", "--all-upcs"]))
+    assert config.SILVER_SCOPE == [ALL]
+
+    listed = tmp_path / "list.csv"
+    listed.write_bytes(UPC_LIST.encode())
+    cli.apply_scope(parse(["ris-view", "--upc-list", str(listed)]))
+    assert len(config.SILVER_SCOPE) == 2
+    monkeypatch.setattr(config, "UPC_LIST_FILE", listed)
+    monkeypatch.setattr(config, "CONSIDER_UPC_LIST", True)
+    cli.apply_scope(parse(["run"]))                                      # default: the config list file
+    assert [s["UPC"] for s in config.SILVER_SCOPE] == ["N/1", "N/2"]
+    monkeypatch.setattr(config, "CONSIDER_UPC_LIST", False)
+    cli.apply_scope(parse(["run"]))
+    assert config.SILVER_SCOPE == [ALL]

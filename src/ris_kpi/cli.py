@@ -7,9 +7,11 @@
     ris-kpi ris-trends
     ris-kpi sync-db-ids [--dry-run]              # after a run: id / created_at from the DB KPI tables
 
-Silver scope (run, status-update, ris-view, ris-trends): config.SILVER_SCOPE, or on the command line
-    --zone B --phase 1 --cycle 1 --upc N/01002/01001/GJ    (a level not given keeps its config value)
-    --all-upcs                                             (every Zone / Phase / Cycle / UPC folder)
+Silver scope (run, status-update, ris-view, ris-trends):
+    default            config.CONSIDER_UPC_LIST True: the surveys of upc_to_run.csv; False: every folder
+    --upc-list FILE    the surveys of another CSV (upc, phase, cycle, zone)
+    --all-upcs         every Zone / Phase / Cycle / UPC folder
+    --zone B --phase 1 --cycle 1 --upc N/01002/01001/GJ    one survey (a level not given = every folder)
 
 Exit code 1 when anything fails.
 """
@@ -26,26 +28,39 @@ SCOPE_ARGS = {"zone": "Zone", "phase": "Phase", "cycle": "Cycle", "upc": "UPC"}
 
 
 def _scope_parser():
-    """Options choosing the silver folders (config.SILVER_SCOPE)."""
+    """Options choosing the silver folders (default: config.CONSIDER_UPC_LIST / config.UPC_LIST_FILE)."""
     scope = argparse.ArgumentParser(add_help=False)
-    group = scope.add_argument_group("silver scope (default: config.SILVER_SCOPE)")
-    for arg, key in SCOPE_ARGS.items():
-        group.add_argument(f"--{arg}", help=f"{key}= folder ('' = every {key} folder)")
+    group = scope.add_argument_group("silver scope (default: upc_to_run.csv when config.CONSIDER_UPC_LIST, "
+                                     "else every folder)")
+    group.add_argument("--upc-list", metavar="CSV", help="surveys of this CSV (upc, phase, cycle, zone)")
     group.add_argument("--all-upcs", action="store_true", help="every Zone / Phase / Cycle / UPC folder")
+    for arg, key in SCOPE_ARGS.items():
+        group.add_argument(f"--{arg}", help=f"one survey: {key}= folder (a level not given = every folder)")
     return scope
 
 
 def apply_scope(args):
-    """Command line scope options -> config.SILVER_SCOPE (logged)."""
+    """Scope options -> config.SILVER_SCOPE (list of surveys), logged. Precedence: --zone/--phase/--cycle/--upc,
+    --all-upcs, --upc-list, then config.CONSIDER_UPC_LIST (upc_to_run.csv) / every folder."""
     from ris_kpi import config
-    if getattr(args, "all_upcs", False):
-        config.SILVER_SCOPE = {key: "" for key in SCOPE_ARGS.values()}
-    for arg, key in SCOPE_ARGS.items():
-        value = getattr(args, arg, None)
-        if value is not None:
-            config.SILVER_SCOPE = {**config.SILVER_SCOPE, key: value}
-    shown = ", ".join(f"{k}={v or '*'}" for k, v in config.SILVER_SCOPE.items())
-    log.info("Silver scope: %s (%s)", shown, config.SILVER_INPUT_DIR)
+    from ris_kpi.common.silver import ALL_SCOPE, describe, make_scope, read_upc_list, run_scopes
+    one = {key: getattr(args, arg) for arg, key in SCOPE_ARGS.items() if getattr(args, arg, None) is not None}
+    if one:
+        config.SILVER_SCOPE, source = [make_scope(one)], "command line"
+    elif getattr(args, "all_upcs", False):
+        config.SILVER_SCOPE, source = [dict(ALL_SCOPE)], "--all-upcs"
+    elif getattr(args, "upc_list", None):
+        config.SILVER_SCOPE, source = read_upc_list(args.upc_list), args.upc_list
+    else:
+        config.SILVER_SCOPE = None
+        source = str(config.UPC_LIST_FILE) if config.CONSIDER_UPC_LIST else "CONSIDER_UPC_LIST off: every folder"
+    log.info("Settings: %s | RIS_KPI_STORAGE=%s | CONSIDER_UPC_LIST=%s | UPC_LIST_FILE=%s | DROP_ROWS_WITHOUT_IDS=%s",
+             config.ENV_FILE if config.ENV_FILE_FOUND else f"no {config.ENV_FILE} (defaults)", config.STORAGE,
+             config.CONSIDER_UPC_LIST, config.UPC_LIST_FILE, config.DROP_ROWS_WITHOUT_IDS)
+    scopes = run_scopes()
+    log.info("Silver scope (%s): %s survey folder(s) under %s", source, len(scopes), config.SILVER_INPUT_DIR)
+    for scope in scopes:
+        log.info("    %s", describe(scope))
 
 
 def _build_parser():

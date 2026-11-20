@@ -58,6 +58,23 @@ def test_trends_ids_and_dropped_rows():
     assert out["upc"].tolist() == ["N/1"]                                  # N/2: no survey id -> dropped
     assert out[["upc_id", "survey_id", "survey_source_id"]].iloc[0].tolist() == ["11", "s1", "9"]
     assert "created_at" not in out.columns                                 # set when appended
+    kept = trends_ids.drop_rows_without_ids(trends_ids.add_db_ids(rows, DB), drop=False)
+    assert kept["upc"].tolist() == ["N/1", "N/2"] and pd.isna(kept["survey_id"].iloc[1])   # DROP_ROWS_WITHOUT_IDS=False
+
+
+def test_view_rows_without_ids_kept_when_not_dropping():
+    out = view_ids.add_db_ids(view_rows(("N/1", "Pothole", None), ("N/2", "Pothole", None)), DB)
+    assert view_ids.drop_rows_without_ids(out)["upc"].tolist() == ["N/1"]
+    kept = view_ids.drop_rows_without_ids(out, drop=False)
+    assert kept["upc"].tolist() == ["N/1", "N/2"] and pd.isna(kept["survey_id"].iloc[1])
+
+
+def test_drop_rows_setting_from_env(monkeypatch):
+    from ris_kpi import config
+    for value, expected in (("False", False), ("no", False), ("TRUE", True), ("", True)):
+        monkeypatch.setenv("DROP_ROWS_WITHOUT_IDS", value)
+        assert config.env_bool("DROP_ROWS_WITHOUT_IDS", True) is expected
+    assert config.RisView.DROP_ROWS_WITHOUT_IDS is config.RisTrends.DROP_ROWS_WITHOUT_IDS   # one setting, both tables
 
 
 def test_upc_lengths_from_master_upc_project():

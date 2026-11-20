@@ -2,8 +2,9 @@
 input_data/
 output_data/
 
-# Secrets
+# Secrets: every .env is ignored except the root .env (run settings + DB keys committed EMPTY; values only on the server)
 .env
+!/.env
 
 # Python
 __pycache__/

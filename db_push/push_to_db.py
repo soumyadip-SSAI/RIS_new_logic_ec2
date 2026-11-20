@@ -18,7 +18,8 @@ For every table:
      With DRY_RUN False, all tables are written in ONE transaction: committed only when every table succeeds,
      otherwise rolled back (the DB is left unchanged).
 
-DB credentials come from environment variables, or from db_push/.env (not committed):
+DB credentials come from environment variables, or from .env in the repository root (keys committed empty;
+the values are filled in on the server only, never committed):
     DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, DB_SCHEMA
 
 Usage (from the repo root, with the project venv active):
@@ -57,7 +58,7 @@ KEY = "id"                                 # rows are matched on this column
 NOT_UPDATED = {KEY, "created_at"}          # never changed on an UPDATE
 PAGE_SIZE = 1000                           # rows per SQL statement
 HERE = Path(__file__).resolve().parent
-ENV_FILE = HERE / ".env"
+ENV_FILE = HERE.parent / ".env"            # repository root .env (shared with the ris_kpi run settings)
 PREVIEW_DIR = HERE / "dry_run_output"
 SAMPLE_ROWS = 5                            # rows / changes printed per table
 
@@ -85,7 +86,7 @@ def db_settings():
     missing = [k for k in ("DB_HOST", "DB_NAME", "DB_USER", "DB_PASSWORD") if not os.environ.get(k)]
     if missing:
         sys.exit(f"Missing DB settings {missing}: set them in {ENV_FILE} or as environment variables")
-    return {"host": os.environ["DB_HOST"], "port": int(os.environ.get("DB_PORT", "5432")),
+    return {"host": os.environ["DB_HOST"], "port": int(os.environ.get("DB_PORT") or "5432"),
             "dbname": os.environ["DB_NAME"], "user": os.environ["DB_USER"], "password": os.environ["DB_PASSWORD"]}
 
 
@@ -407,7 +408,7 @@ def main():
     sources = {"ris_view": args.view_csv, "ris_trends": args.trends_csv}
     load_env()
     settings = db_settings()
-    schema = os.environ.get("DB_SCHEMA", "public")
+    schema = os.environ.get("DB_SCHEMA") or "public"
     print(f"{'DRY RUN - nothing is written to the DB' if dry_run else 'LIVE RUN - the DB will be changed'}\n"
           f"DB: {settings['user']}@{settings['host']}:{settings['port']}/{settings['dbname']} schema {schema}")
 

@@ -2,7 +2,7 @@
 
   load_status_table   newest saved silver status table (step 1 output), keys normalised as the silver tables
   load_intermediate   newest saved intermediate_10m_data (step 2 output), back to the in-memory column names
-Both keep only the rows of the silver scope (config.SILVER_SCOPE): a scoped run never recalculates other surveys.
+Both keep only the rows of the run scope (upc_to_run.csv / every folder): other surveys are never recalculated.
 Silver input tables: common/silver.load_silver.
 """
 import logging

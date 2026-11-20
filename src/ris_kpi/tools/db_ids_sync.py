@@ -1,6 +1,7 @@
 """Copy `id` / `created_at` from the DB KPI tables into the saved outputs (run manually after `ris-kpi run`):
 
-    run_data  = KPI_OUTPUT_ROOT/Latest/ris_view_data.csv, ris_trends_data.csv (overwritten, same name)
+    run_data  = KPI_OUTPUT_ROOT/Latest/ris_view_data.csv, ris_trends_data.csv and the newest dated copy
+                year=/month=/day=/<same name>.csv (each overwritten in place, same name)
     kpi_data  = DB export ris_view_kpi / ris_trends_kpi in DB_TABLES_DIR (DHMS/DIC_Staging/Latest)
 
 A run_data row whose KEYS match a kpi_data row takes that row's id and created_at, so the DB push later UPDATEs the
@@ -15,8 +16,8 @@ status is needed to make a ris_view row unique (an open and a close row per defe
 separate the Good / Fair / Poor rows of ris_trends (an empty category matches an empty category). A key that is still shared by several rows (in run_data or in
 kpi_data) is ambiguous and is left unchanged (logged).
 
-Only the Latest/ file is overwritten; the dated year=/month=/day= copies are not touched. The next `ris-kpi run`
-reads the newest dated copy and writes Latest/ again with the pipeline's ids, so run this after every `ris-kpi run`.
+Both the Latest/ file and the newest dated copy (the one the next `ris-kpi run` reads) are synced, each on its own
+rows, so the DB ids are carried into the next run. Older dated copies are history and are not touched.
 
     ris-kpi sync-db-ids --dry-run      # report only, nothing saved
     ris-kpi sync-db-ids                # copy and save
@@ -131,30 +132,49 @@ def log_report(label, r, survey_cols):
                  .to_string(index=False))
 
 
+def run_data_locations(root, name):
+    """<root>/Latest/<name>.csv and the newest dated <root>/year=/month=/day=/<name>.csv (those that exist)."""
+    locations = [storage.latest_location(root, name)]
+    newest = storage.find_latest(root, name)                                       # newest dated copy (or Latest)
+    if newest is not None and str(newest) != str(locations[0]):
+        locations.append(newest)
+    return [loc for loc in locations if exists(loc)]
+
+
+def sync_location(name, location, kpi_data, key, dry_run):
+    """Copy the DB ids into one saved file (overwritten in place when something changed); its report or None."""
+    run_data = storage.read_text(location, empty_as_null=False)
+    if run_data.empty:
+        log.warning("%s: no rows in %s — nothing to do", name, location)
+        return None
+    log.info("%s: run_data %s (%s rows)", name, location, f"{len(run_data):,}")
+    out, report = copy_db_ids(run_data, kpi_data, key, name)
+    log_report(name, report, ["upc_id", "survey_id", "defect_detected_on"])
+    if dry_run:
+        log.info("%s: DRY RUN — %s not saved", name, location)
+    elif report["changed"] == 0:
+        log.info("%s: ids already match the DB — %s not saved", name, location)
+    else:
+        write_text(out, location)
+        log.info("%s: saved %s — %s rows", name, location, f"{len(out):,}")
+    return report
+
+
 def sync_table(name, dry_run=False, db_dir=None):
-    """Copy the DB ids into one saved table; returns its report (None when there is nothing to do)."""
+    """Copy the DB ids into the Latest/ copy and the newest dated copy of one table; returns the report of the first
+    synced copy (Latest/ when it exists), None when there is nothing to do."""
     cfg = TABLES[name]
     db_dir = db_dir or config.DB_TABLES_DIR
-    location = storage.latest_location(cfg["run_root"], cfg["run_name"])         # <root>/Latest/<name>.csv
-    run_data = storage.read_text(location, empty_as_null=False) if exists(location) else None
-    if run_data is None or run_data.empty:
-        log.warning("%s: no rows in %s — nothing to do", name, location)
+    locations = run_data_locations(cfg["run_root"], cfg["run_name"])
+    if not locations:
+        log.warning("%s: no saved %s.csv in %s — nothing to do", name, cfg["run_name"], cfg["run_root"])
         return None
     db_location = find_db_table(db_dir, cfg["db_table"])
     kpi_data = read_db_table(db_location)
-    log.info("%s: run_data %s (%s rows), kpi_data %s (%s rows)", name, location, f"{len(run_data):,}",
-             db_location, f"{len(kpi_data):,}")
-
-    out, report = copy_db_ids(run_data, kpi_data, cfg["key"], name)
-    log_report(name, report, ["upc_id", "survey_id", "defect_detected_on"])
-    if dry_run:
-        log.info("%s: DRY RUN — nothing saved", name)
-    elif report["changed"] == 0:
-        log.info("%s: ids already match the DB — nothing saved", name)
-    else:
-        write_text(out, location)                                                  # overwrite Latest only
-        log.info("%s: saved %s — %s rows", name, location, f"{len(out):,}")
-    return report
+    log.info("%s: kpi_data %s (%s rows); syncing %s", name, db_location, f"{len(kpi_data):,}",
+             " and ".join(str(loc) for loc in locations))
+    reports = [sync_location(name, loc, kpi_data, cfg["key"], dry_run) for loc in locations]
+    return next((r for r in reports if r is not None), None)
 
 
 def write_text(df, location):

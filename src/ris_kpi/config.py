@@ -1,13 +1,53 @@
 """All settings for the RIS KPI pipelines (new silver logic), in one place, grouped by pipeline step.
 
-Where the data lives is chosen with the RIS_KPI_STORAGE environment variable:
-  s3     (default) read the inputs from S3 and write every output to S3 — the EC2 runs
-  local  input_data/ and output_data/ in the repository — development / before-after checks without AWS access
+Run settings are read from the .env file in the repository root (committed; run settings only, no credentials).
+An environment variable of the same name wins over the .env value; without .env the defaults below apply:
+  RIS_KPI_STORAGE     s3 (default): inputs from S3, every output to S3 — the EC2 runs
+                      local: input_data/ and output_data/ in the repository — development without AWS access
+  CONSIDER_UPC_LIST   True (default): only the surveys of UPC_LIST_FILE; False: every silver folder
+  UPC_LIST_FILE       the survey list, relative to the repository root (default upc_to_run.csv) or absolute
+  DROP_ROWS_WITHOUT_IDS  True (default): ris_view_data / ris_trends_data rows with an empty upc_id / survey_id /
+                      survey_source_id are dropped (logged); False: they are kept with the empty ids (logged)
 
 AWS credentials are not set here: boto3 finds them itself (the EC2 instance role, or `aws configure` locally).
 """
 import os
 from pathlib import Path
+
+# src/ris_kpi/config.py -> repository root (RIS_KPI_ROOT overrides it, e.g. for a non-editable install)
+ROOT_DIR = Path(os.getenv("RIS_KPI_ROOT") or Path(__file__).resolve().parents[2])
+ENV_FILE = ROOT_DIR / ".env"
+
+
+def load_env(path=ENV_FILE):
+    """KEY=VALUE lines of the .env file into os.environ (variables already set win; # comments, quotes allowed).
+    Returns True when the file exists."""
+    path = Path(path)
+    if not path.is_file():
+        return False
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.split(" #", 1)[0].strip().strip('"').strip("'")
+        os.environ.setdefault(key.strip(), value)
+    return True
+
+
+def env_bool(name, default):
+    """True / False setting from the environment (.env): true/false, yes/no, 1/0 (any case)."""
+    value = (os.getenv(name) or "").strip().lower()
+    if not value:
+        return default
+    if value in ("1", "true", "yes", "y"):
+        return True
+    if value in ("0", "false", "no", "n"):
+        return False
+    raise ValueError(f"{name} must be True or False (in {ENV_FILE} or the environment), not {value!r}")
+
+
+ENV_FILE_FOUND = load_env()
 
 STORAGE = (os.getenv("RIS_KPI_STORAGE") or "s3").strip().lower()
 
@@ -17,7 +57,7 @@ if STORAGE == "s3":
     # DB tables written by the DB export job: dlm_defect_case, udm_defect_reference (statuses), master_upc_project,
     # master_survey_system, survey_data_map, master_defect_type (UPC filter / lengths, DB id columns) — <table>.csv
     DB_TABLES_DIR = f"{BUCKET}/NSV/DHMS/DIC_Staging/Latest"
-    # Silver tables (parquet / csv), one folder per survey, read for SILVER_SCOPE and stacked (common/silver.py):
+    # Silver tables (parquet / csv), one folder per survey, read for the run scope (upc_to_run.csv / every folder) and stacked (common/silver.py):
     #   <SILVER_INPUT_DIR>/Zone=B/Phase=1/Cycle=1/UPC=N_01002_01001_GJ/dlm_kpi_new/master_cracking_10m.parquet
     SILVER_INPUT_DIR = f"{BUCKET}/DHMS/NSV/Silver"
     # Outputs — all in the gold folder, each table saved as
@@ -29,8 +69,6 @@ if STORAGE == "s3":
     KPI_OUTPUT_ROOT = GOLD_ROOT          # ris_view_data, ris_trends_data
     LATEST_FOLDER = "Latest"
 elif STORAGE == "local":
-    # src/ris_kpi/config.py -> repository root (RIS_KPI_ROOT overrides it, e.g. for a non-editable install)
-    ROOT_DIR = Path(os.getenv("RIS_KPI_ROOT") or Path(__file__).resolve().parents[2])
     INPUT_DATA_DIR = ROOT_DIR / "input_data"
     OUTPUT_DATA_DIR = ROOT_DIR / "output_data"
     # Inputs
@@ -47,11 +85,21 @@ else:
     raise ValueError(f"RIS_KPI_STORAGE must be 's3' or 'local', not {STORAGE!r}")
 
 
-# Which silver folders a run reads: <SILVER_INPUT_DIR>/Zone=<Zone>/Phase=<Phase>/Cycle=<Cycle>/UPC=<UPC>/...
-# An empty value ("") = every folder of that level, e.g. {"Zone": "", "Phase": "", "Cycle": "", "UPC": ""} = all UPCs.
-# UPC in '/' or '_' form. Overridden on the command line: ris-kpi run --zone B --phase 1 --cycle 1 --upc N/01002/01001/GJ
-# (--all-upcs = every folder). Rows of other surveys already in the gold tables are never changed by a scoped run.
-SILVER_SCOPE = {"Zone": "B", "Phase": "1", "Cycle": "1", "UPC": "N/01002/01001/GJ"}
+# Which silver folders a run reads: <SILVER_INPUT_DIR>/Zone=<zone>/Phase=<phase>/Cycle=<cycle>/UPC=<upc>/...
+# Set in .env (see the top of this file):
+#   CONSIDER_UPC_LIST=True   only the surveys listed in UPC_LIST_FILE (one row per survey folder)
+#   CONSIDER_UPC_LIST=False  every Zone / Phase / Cycle / UPC folder under SILVER_INPUT_DIR
+# UPC_LIST_FILE: CSV with the columns upc, phase, cycle, zone (any order; upc in '/' or '_' form; an empty cell =
+# every folder of that level). Rows of surveys not in the run are never changed in the gold tables.
+# Command line overrides (common/silver.py, cli.py): --upc-list FILE, --all-upcs, --zone/--phase/--cycle/--upc
+# (one survey).
+CONSIDER_UPC_LIST = env_bool("CONSIDER_UPC_LIST", True)
+UPC_LIST_FILE = ROOT_DIR / (os.getenv("UPC_LIST_FILE") or "upc_to_run.csv").strip()   # an absolute path stays as is
+# ris_view_data and ris_trends_data: True = rows with an empty upc_id / survey_id / survey_source_id are dropped,
+# False = kept with the empty ids (logged either way). Set in .env.
+DROP_ROWS_WITHOUT_IDS = env_bool("DROP_ROWS_WITHOUT_IDS", True)
+# Set at run time from the settings above (list of {"Zone", "Phase", "Cycle", "UPC"}); None = not resolved yet
+SILVER_SCOPE = None
 
 
 # Silver tables (file names without extension; the same name in every UPC folder)
@@ -101,8 +149,8 @@ class RisView:
     STATUS_KEY = "id"
 
     # --- ris_view_data ---
-    # True = rows with an empty upc_id / survey_id / survey_source_id are dropped (logged)
-    DROP_ROWS_WITHOUT_IDS = True
+    # True = rows with an empty upc_id / survey_id / survey_source_id are dropped (logged); from .env
+    DROP_ROWS_WITHOUT_IDS = DROP_ROWS_WITHOUT_IDS
 
     # --- Output (file names without .csv) ---
     # Every output table is saved twice (common/storage.py):
@@ -136,6 +184,8 @@ class RisTrends:
     FILTER_BY_PROJECT_MASTER = True
     # DB tables: master_upc_project (UPC filter + upc_id), master_survey_system / survey_data_map (DB id columns)
     DB_TABLES_DIR = DB_TABLES_DIR
+    # True = rows with an empty upc_id / survey_id / survey_source_id are dropped (logged); from .env
+    DROP_ROWS_WITHOUT_IDS = DROP_ROWS_WITHOUT_IDS
 
     # --- Output ---
     # ris_trends_data, saved as OUTPUT_ROOT/year=YYYY/month=MM/day=DD/ris_trends_data.csv (run date) + latest/.

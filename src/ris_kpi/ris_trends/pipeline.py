@@ -76,7 +76,7 @@ def run_ris_trends(run_time=None):
     rows = combine(kpis, categories)
 
     # --- 5. DB ids -> rows of the new surveys ---
-    created = drop_rows_without_ids(add_db_ids(rows, db_tables))[FINAL_COLUMNS]
+    created = drop_rows_without_ids(add_db_ids(rows, db_tables), drop=cfg.DROP_ROWS_WITHOUT_IDS)[FINAL_COLUMNS]
     log.info("ris_trends_data of the new surveys — %s rows × %s cols", f"{len(created):,}", created.shape[1])
 
     # --- 6. Appended to the saved ris_trends_data (created_at = updated_at = this run) -> run date + latest ---

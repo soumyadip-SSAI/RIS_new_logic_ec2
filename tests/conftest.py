@@ -4,7 +4,15 @@ from datetime import datetime, timezone
 import pytest
 from botocore.exceptions import ClientError
 
+from ris_kpi import config
 from ris_kpi.common import s3
+
+
+@pytest.fixture(autouse=True)
+def every_silver_folder(monkeypatch):
+    """Tests do not depend on the repository's upc_to_run.csv: the run scope is every folder unless a test sets it."""
+    monkeypatch.setattr(config, "CONSIDER_UPC_LIST", False)
+    monkeypatch.setattr(config, "SILVER_SCOPE", None)
 
 
 class FakeS3:

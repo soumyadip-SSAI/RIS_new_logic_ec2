@@ -22,8 +22,15 @@ Only columns that exist in both the CSV and the DB table are pushed. The others 
 ```bash
 source .venv/bin/activate            # the project venv
 pip install -r db_push/requirements.txt
-cp db_push/.env.example db_push/.env # then fill in DB_HOST, DB_NAME, DB_USER, DB_PASSWORD (.env is not committed)
+nano .env                            # repository root .env: fill in DB_HOST, DB_NAME, DB_USER, DB_PASSWORD
+git update-index --skip-worktree .env   # git ignores the filled-in values: they are never committed
 ```
+
+The keys are committed in the root `.env` with **empty values**. Fill them in on the server only. Two things keep them out of git:
+- **`--skip-worktree`:** with it set, `git status` and `git commit -a` don't pick up the change.
+- **Undo before pulling a new `.env`:** `git update-index --no-skip-worktree .env`.
+
+Instead of the file, you can also export `DB_HOST` and the other keys as environment variables. They win over `.env`.
 
 ## Run
 
