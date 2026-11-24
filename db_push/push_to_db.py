@@ -48,11 +48,13 @@ from psycopg2.extras import execute_values
 # ---------------------------------------------------------------------------------------------------------------------
 DRY_RUN = True                     # True: read and report only. False: insert / update in the DB (or --dry-run false)
 
-S3_LATEST = "s3://dhms-new-stgae/DHMS/NSV/Gold/Latest"
+# Folder with ris_view_data.csv / ris_trends_data.csv: <S3_GOLD_OUTPUT_DIR>/Latest from .env (read in main),
+# else this default
+DEFAULT_SOURCE_DIR = "s3://dhms-new-stgae/DHMS/NSV/Gold/Latest"
 TABLES = {
-    # name: CSV source, DB table, CSV columns never pushed
-    "ris_view": {"source": f"{S3_LATEST}/ris_view_data.csv", "table": "ris_view_kpi", "drop": []},
-    "ris_trends": {"source": f"{S3_LATEST}/ris_trends_data.csv", "table": "ris_trends_kpi", "drop": ["phase", "cycle"]},
+    # name: CSV file in the source folder, DB table, CSV columns never pushed
+    "ris_view": {"file": "ris_view_data.csv", "table": "ris_view_kpi", "drop": []},
+    "ris_trends": {"file": "ris_trends_data.csv", "table": "ris_trends_kpi", "drop": ["phase", "cycle"]},
 }
 KEY = "id"                                 # rows are matched on this column
 NOT_UPDATED = {KEY, "created_at"}          # never changed on an UPDATE
@@ -88,6 +90,12 @@ def db_settings():
         sys.exit(f"Missing DB settings {missing}: set them in {ENV_FILE} or as environment variables")
     return {"host": os.environ["DB_HOST"], "port": int(os.environ.get("DB_PORT") or "5432"),
             "dbname": os.environ["DB_NAME"], "user": os.environ["DB_USER"], "password": os.environ["DB_PASSWORD"]}
+
+
+def source_dir():
+    """Folder of the CSVs: <S3_GOLD_OUTPUT_DIR>/Latest (same .env key as the ris_kpi run), else DEFAULT_SOURCE_DIR."""
+    gold = (os.environ.get("S3_GOLD_OUTPUT_DIR") or "").strip().rstrip("/")
+    return f"{gold}/Latest" if gold else DEFAULT_SOURCE_DIR
 
 
 def read_csv(source):
@@ -407,6 +415,7 @@ def main():
     dry_run = DRY_RUN if args.dry_run is None else args.dry_run == "true"
     sources = {"ris_view": args.view_csv, "ris_trends": args.trends_csv}
     load_env()
+    folder = source_dir()
     settings = db_settings()
     schema = os.environ.get("DB_SCHEMA") or "public"
     print(f"{'DRY RUN - nothing is written to the DB' if dry_run else 'LIVE RUN - the DB will be changed'}\n"
@@ -419,7 +428,7 @@ def main():
             for name, cfg in TABLES.items():
                 if args.only and name not in args.only:
                     continue
-                plan = plan_table(cur, name, cfg, schema, sources[name] or cfg["source"])
+                plan = plan_table(cur, name, cfg, schema, sources[name] or f"{folder}/{cfg['file']}")
                 if plan is not None:
                     report(plan)
                     plans.append(plan)

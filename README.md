@@ -120,6 +120,9 @@ Run settings live in `.env` in the repository root.
 | `CONSIDER_UPC_LIST` | `True` | `True`: only the surveys in `UPC_LIST_FILE`. `False`: every silver folder |
 | `UPC_LIST_FILE` | `upc_to_run.csv` | survey list (`upc`, `phase`, `cycle`, `zone`), relative to the repository root or absolute |
 | `DROP_ROWS_WITHOUT_IDS` | `True` | `ris_view_data` and `ris_trends_data` rows with an empty `upc_id`, `survey_id` or `survey_source_id`. `True`: dropped. `False`: kept with the empty ids. Logged either way |
+| `S3_DB_TABLES_DIR` | the current DB export folder | input: DB tables (`dlm_defect_case`, `udm_defect_reference`, `master_upc_project`, ...) |
+| `S3_SILVER_INPUT_DIR` | `s3://dhms-new-stgae/DHMS/NSV/Silver` | input: silver tables, `Zone=/Phase=/Cycle=/UPC=` folders |
+| `S3_GOLD_OUTPUT_DIR` | the current gold folder | output: every table in `year=/month=/day=/` and `Latest/`; the newest copy is read back on the next run, so a new folder means a fresh start. `db_push` reads `<S3_GOLD_OUTPUT_DIR>/Latest/` |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SCHEMA` | empty, `5432`, `public` | `db_push` credentials, filled in on the server only (see `db_push/README.md`) |
 
 The first log line shows the settings used, for example `Settings: .../.env | RIS_KPI_STORAGE=s3 | CONSIDER_UPC_LIST=True | ...`.

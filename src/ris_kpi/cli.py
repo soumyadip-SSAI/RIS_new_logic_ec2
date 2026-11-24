@@ -57,6 +57,9 @@ def apply_scope(args):
     log.info("Settings: %s | RIS_KPI_STORAGE=%s | CONSIDER_UPC_LIST=%s | UPC_LIST_FILE=%s | DROP_ROWS_WITHOUT_IDS=%s",
              config.ENV_FILE if config.ENV_FILE_FOUND else f"no {config.ENV_FILE} (defaults)", config.STORAGE,
              config.CONSIDER_UPC_LIST, config.UPC_LIST_FILE, config.DROP_ROWS_WITHOUT_IDS)
+    log.info("Paths: DB tables %s | silver %s | silver status -> %s | intermediate -> %s | KPI -> %s (+ /%s)",
+             config.DB_TABLES_DIR, config.SILVER_INPUT_DIR, config.SILVER_STATUS_ROOT, config.INTERMEDIATE_ROOT,
+             config.KPI_OUTPUT_ROOT, config.LATEST_FOLDER)
     scopes = run_scopes()
     log.info("Silver scope (%s): %s survey folder(s) under %s", source, len(scopes), config.SILVER_INPUT_DIR)
     for scope in scopes:
