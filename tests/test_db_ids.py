@@ -81,3 +81,18 @@ def test_upc_lengths_from_master_upc_project():
     info = load_project_master(DB["master_upc_project"]).set_index("upc")
     assert info.loc["N/1", "upc_length_km"] == 10.5 and info.loc["N/1", "upc_lane_length_km"] == 42
     assert pd.isna(info.loc["N/2", "upc_length_km"])                       # '_' form read as '/', invalid -> NaN
+
+
+def test_survey_id_matched_on_upc_phase_cycle_only():
+    """survey_id: upc + phase + cycle; survey_date (and defect_detected_on) are not part of the key."""
+    db = dict(DB, survey_data_map=pd.DataFrame({
+        "survey_schedule_id": ["s1", "s1", "s2"], "upc": ["N/1", "N_1", "N/2"], "phase": ["1", "1.0", "1"],
+        "cycle": ["2", "2", "2"], "survey_date": ["2020-01-01", None, "2020-01-01"]}))   # dates differ from the data
+    rows = pd.DataFrame({"upc": ["N_1", "N/1", "N/2", "N/1"], "phase": ["1", "1", "1", "1"],
+                         "cycle": ["2", "2", "2", "3"], "source_system": ["NSV"] * 4,
+                         "defect_detected_on": ["2026-01-05", "2026-03-09", None, "2026-01-05"]})
+    out = trends_ids.add_db_ids(rows, db)
+    assert out["survey_id"].tolist()[:3] == ["s1", "s1", "s2"]
+    assert pd.isna(out["survey_id"].iloc[3])                               # cycle 3: no survey_data_map row
+    view = view_ids.add_db_ids(view_rows(("N/1", "Pothole", None)).assign(defect_detected_on="2026-07-07"), db)
+    assert view["survey_id"].tolist() == ["s1"]

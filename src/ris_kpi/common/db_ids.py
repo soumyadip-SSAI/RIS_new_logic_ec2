@@ -13,7 +13,7 @@ from ris_kpi.common.keys import upc_slash
 
 log = logging.getLogger(__name__)
 
-SURVEY_KEYS = ["upc", "phase", "cycle", "survey_date"]
+SURVEY_KEYS = ["upc", "phase", "cycle"]
 
 
 # --- key normalisation -----------------------------------------------------------------------------------------
@@ -60,15 +60,14 @@ def survey_source_lookup(master_survey_system, id_col):
 
 
 def survey_lookup(survey_data_map, id_col):
-    """upc + phase + cycle + survey_date -> survey_data_map.survey_schedule_id (as id_col)."""
+    """upc + phase + cycle -> survey_data_map.survey_schedule_id (as id_col); survey_date not used."""
     lk = pd.DataFrame({
         "upc": survey_data_map["upc"].astype("string"),
         "phase": key_text(survey_data_map["phase"]),
         "cycle": key_text(survey_data_map["cycle"]),
-        "survey_date": date_text(survey_data_map["survey_date"]),
         id_col: survey_data_map["survey_schedule_id"],
     })
-    return dedup(lk.dropna(subset=SURVEY_KEYS), SURVEY_KEYS, "survey_data_map")
+    return dedup(lk.dropna(subset=SURVEY_KEYS + [id_col]).drop_duplicates(), SURVEY_KEYS, "survey_data_map")
 
 
 def left_join_ids(df, lookup, left_on, right_on, id_col):

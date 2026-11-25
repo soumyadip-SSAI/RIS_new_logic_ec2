@@ -25,7 +25,7 @@ REQUIRED_COLUMNS = {
     "udm_defect_reference": ["id", "defect_collection", "defect_id"],
     "master_upc_project": ["id", "upc", "length_km", "lane_length_km"],
     "master_survey_system": ["id", "system_code"],
-    "survey_data_map": ["survey_schedule_id", "upc", "phase", "cycle", "survey_date"],
+    "survey_data_map": ["survey_schedule_id", "upc", "phase", "cycle"],
     "master_defect_type": ["id", "survey_system", "asset_type", "defect_name"],
 }
 SNAPSHOT_SUFFIXES = (".csv", ".parquet")

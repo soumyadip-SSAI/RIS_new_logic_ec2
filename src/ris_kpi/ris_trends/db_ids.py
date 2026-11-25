@@ -2,8 +2,8 @@
 
     upc_id            master_upc_project    upc = upc                                                 -> id
     survey_source_id  master_survey_system  source_system ('NSV') = system_code                       -> id
-    survey_id         survey_data_map       upc + phase + cycle + defect_detected_on
-                                            = upc + phase + cycle + survey_date                       -> survey_schedule_id
+    survey_id         survey_data_map       upc + phase + cycle = upc + phase + cycle                 -> survey_schedule_id
+                                            (survey_date / defect_detected_on not used)
     id                random uuid4 per row (set when the survey's rows are appended)
 created_at / updated_at are set when the rows are appended (ris_trends/append.py).
 
@@ -22,14 +22,6 @@ log = logging.getLogger(__name__)
 ID_DB_TABLES = ["master_upc_project", "master_survey_system", "survey_data_map"]
 REQUIRED_IDS = ["upc_id", "survey_id", "survey_source_id"]
 SURVEY_KEYS = ["upc", "phase", "cycle", "defect_detected_on"]
-
-
-def _date_text(series):
-    """Dates as yyyy-mm-dd ('2026-04-21 00:00:00+00' -> '2026-04-21')."""
-    s = series.astype("string").str.strip()
-    iso = s.str.match(r"^\d{4}-\d{2}-\d{2}").fillna(False).astype(bool)
-    parsed = pd.to_datetime(s.where(~iso), dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
-    return s.str[:10].where(iso, parsed.astype("string"))
 
 
 def _dedup(lookup, keys, table):
@@ -62,7 +54,6 @@ def add_db_ids(df, db_tables):
     df["_src"] = df["source_system"].astype("string").str.strip()
     df["_phase"] = text_id(df["phase"])
     df["_cycle"] = text_id(df["cycle"])
-    df["_date"] = _date_text(df["defect_detected_on"])
 
     upc = _dedup(pd.DataFrame({"_upc": upc_slash(upc_table["upc"]), "upc_id": upc_table["id"]})
                  .dropna(subset=["_upc"]), ["_upc"], "master_upc_project")
@@ -73,18 +64,19 @@ def add_db_ids(df, db_tables):
                  .dropna(subset=["_src"]), ["_src"], "master_survey_system")
     df = _join(df, src, ["_src"], "survey_source_id", ["source_system"])
 
-    keys = ["_upc", "_phase", "_cycle", "_date"]
+    # survey_id on upc + phase + cycle (no date); the same survey_schedule_id on several rows is one survey, a
+    # different survey_schedule_id for the same upc + phase + cycle is logged and the first one kept
+    keys = ["_upc", "_phase", "_cycle"]
     survey = _dedup(pd.DataFrame({
         "_upc": upc_slash(survey_map_table["upc"]),
         "_phase": text_id(survey_map_table["phase"]),
         "_cycle": text_id(survey_map_table["cycle"]),
-        "_date": _date_text(survey_map_table["survey_date"]),
         "survey_id": survey_map_table["survey_schedule_id"],
-    }).dropna(subset=keys), keys, "survey_data_map")
+    }).dropna(subset=keys + ["survey_id"]).drop_duplicates(), keys, "survey_data_map")
     df = _join(df, survey, keys, "survey_id", SURVEY_KEYS)
 
     df["id"] = [str(uuid.uuid4()) for _ in range(len(df))]
-    return df.drop(columns=["_upc", "_src", "_phase", "_cycle", "_date"])
+    return df.drop(columns=["_upc", "_src", "_phase", "_cycle"])
 
 
 def drop_rows_without_ids(df, drop=True):

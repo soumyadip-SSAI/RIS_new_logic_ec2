@@ -196,7 +196,7 @@ One row per survey, defect type (plus `Total`), pavement group and status (`open
   |---|---|---|
   | `upc_id` | `master_upc_project` | upc → `id` |
   | `survey_source_id` | `master_survey_system` | source_system (`NSV`) = `system_code` → `id` |
-  | `survey_id` | `survey_data_map` | upc + phase + cycle + defect_detected_on = `survey_date` → `survey_schedule_id` |
+  | `survey_id` | `survey_data_map` | upc + phase + cycle → `survey_schedule_id` (`survey_date` is not used) |
   | `defect_type_id` | `master_defect_type` | survey_system + asset_type + defect_name (as before; Rutting `PAVEMENT`, else `Flexible Pavement`; `Total`: none) |
   | `id` | — | a random uuid4 per row, set on INSERT and kept by UPDATE runs |
 
