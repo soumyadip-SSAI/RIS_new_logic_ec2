@@ -27,6 +27,7 @@ REQUIRED_COLUMNS = {
     "master_survey_system": ["id", "system_code"],
     "survey_data_map": ["survey_schedule_id", "upc", "phase", "cycle"],
     "master_defect_type": ["id", "survey_system", "asset_type", "defect_name"],
+    "wfm_survey_schedule": ["id", "upc", "current_status"],   # SURVEY_ID_FALLBACK only
 }
 SNAPSHOT_SUFFIXES = (".csv", ".parquet")
 

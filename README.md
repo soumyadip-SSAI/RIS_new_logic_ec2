@@ -120,6 +120,7 @@ Run settings live in `.env` in the repository root.
 | `CONSIDER_UPC_LIST` | `True` | `True`: only the surveys in `UPC_LIST_FILE`. `False`: every silver folder |
 | `UPC_LIST_FILE` | `upc_to_run.csv` | survey list (`upc`, `phase`, `cycle`, `zone`), relative to the repository root or absolute |
 | `DROP_ROWS_WITHOUT_IDS` | `True` | `ris_view_data` and `ris_trends_data` rows with an empty `upc_id`, `survey_id` or `survey_source_id`. `True`: dropped. `False`: kept with the empty ids. Logged either way |
+| `SURVEY_ID_FALLBACK` | `True` | one upc + phase + cycle with several `survey_schedule_id`s in `survey_data_map`. `True`: picked with `wfm_survey_schedule` (see DB ids below). `False`: `survey_id` left empty. Logged either way |
 | `S3_DB_TABLES_DIR` | the current DB export folder | input: DB tables (`dlm_defect_case`, `udm_defect_reference`, `master_upc_project`, ...) |
 | `S3_SILVER_INPUT_DIR` | `s3://dhms-new-stgae/DHMS/NSV/Silver` | input: silver tables, `Zone=/Phase=/Cycle=/UPC=` folders |
 | `S3_GOLD_OUTPUT_DIR` | the current gold folder | output: every table in `year=/month=/day=/` and `Latest/`; the newest copy is read back on the next run, so a new folder means a fresh start. `db_push` reads `<S3_GOLD_OUTPUT_DIR>/Latest/` |
@@ -196,9 +197,17 @@ One row per survey, defect type (plus `Total`), pavement group and status (`open
   |---|---|---|
   | `upc_id` | `master_upc_project` | upc → `id` |
   | `survey_source_id` | `master_survey_system` | source_system (`NSV`) = `system_code` → `id` |
-  | `survey_id` | `survey_data_map` | upc + phase + cycle → `survey_schedule_id` (`survey_date` is not used) |
+  | `survey_id` | `survey_data_map` (+ `wfm_survey_schedule`) | upc + phase + cycle → `survey_schedule_id` (`survey_date` is not used); several ids: see below |
   | `defect_type_id` | `master_defect_type` | survey_system + asset_type + defect_name (as before; Rutting `PAVEMENT`, else `Flexible Pavement`; `Total`: none) |
   | `id` | — | a random uuid4 per row, set on INSERT and kept by UPDATE runs |
+
+  **Several `survey_schedule_id`s for one upc + phase + cycle** (the same id on several rows counts once):
+  - `SURVEY_ID_FALLBACK=True`:
+    1. Each id is matched to `wfm_survey_schedule.id` (read from `S3_DB_TABLES_DIR`), and kept only when `wfm_survey_schedule.upc` is the same UPC.
+    2. The id whose `current_status` is `Survey Final Approved` is used, else the one with `Validation in Progress`.
+    3. No such id, or several ids with the same status: `survey_id` is left empty.
+    The log lists every candidate id with its status and the one chosen.
+  - `SURVEY_ID_FALLBACK=False`: `survey_id` is left empty for that upc + phase + cycle (logged).
 
   Rows with an empty `upc_id`, `survey_id` or `survey_source_id` are **dropped** and logged (`DROP_ROWS_WITHOUT_IDS=True` in `.env`; `False` keeps them with the empty ids, for ris_view_data and ris_trends_data).
 - **Columns:**

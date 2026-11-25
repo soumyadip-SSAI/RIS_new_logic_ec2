@@ -9,6 +9,9 @@ An environment variable of the same name wins over the .env value; without .env 
   UPC_LIST_FILE       the survey list, relative to the repository root (default upc_to_run.csv) or absolute
   DROP_ROWS_WITHOUT_IDS  True (default): ris_view_data / ris_trends_data rows with an empty upc_id / survey_id /
                       survey_source_id are dropped (logged); False: they are kept with the empty ids (logged)
+  SURVEY_ID_FALLBACK  True (default): one upc + phase + cycle with several survey_schedule_ids in survey_data_map ->
+                      the id picked by wfm_survey_schedule (same upc; current_status 'Survey Final Approved', else
+                      'Validation in Progress'); False: survey_id left empty for it (common/db_ids.survey_id_lookup)
 
 AWS credentials are not set here: boto3 finds them itself (the EC2 instance role, or `aws configure` locally).
 """
@@ -102,6 +105,10 @@ UPC_LIST_FILE = ROOT_DIR / (os.getenv("UPC_LIST_FILE") or "upc_to_run.csv").stri
 # ris_view_data and ris_trends_data: True = rows with an empty upc_id / survey_id / survey_source_id are dropped,
 # False = kept with the empty ids (logged either way). Set in .env.
 DROP_ROWS_WITHOUT_IDS = env_bool("DROP_ROWS_WITHOUT_IDS", True)
+# survey_id (ris_view_data, ris_trends_data) when survey_data_map has several survey_schedule_ids for one
+# upc + phase + cycle: True = pick one by wfm_survey_schedule (same upc; current_status 'Survey Final Approved', else
+# 'Validation in Progress'; wfm_survey_schedule is then read from DB_TABLES_DIR), False = leave it empty. Set in .env.
+SURVEY_ID_FALLBACK = env_bool("SURVEY_ID_FALLBACK", True)
 # Set at run time from the settings above (list of {"Zone", "Phase", "Cycle", "UPC"}); None = not resolved yet
 SILVER_SCOPE = None
 
@@ -155,6 +162,8 @@ class RisView:
     # --- ris_view_data ---
     # True = rows with an empty upc_id / survey_id / survey_source_id are dropped (logged); from .env
     DROP_ROWS_WITHOUT_IDS = DROP_ROWS_WITHOUT_IDS
+    # Several survey_schedule_ids for one upc + phase + cycle: True = pick by wfm_survey_schedule; from .env
+    SURVEY_ID_FALLBACK = SURVEY_ID_FALLBACK
 
     # --- Output (file names without .csv) ---
     # Every output table is saved twice (common/storage.py):
@@ -190,6 +199,8 @@ class RisTrends:
     DB_TABLES_DIR = DB_TABLES_DIR
     # True = rows with an empty upc_id / survey_id / survey_source_id are dropped (logged); from .env
     DROP_ROWS_WITHOUT_IDS = DROP_ROWS_WITHOUT_IDS
+    # Several survey_schedule_ids for one upc + phase + cycle: True = pick by wfm_survey_schedule; from .env
+    SURVEY_ID_FALLBACK = SURVEY_ID_FALLBACK
 
     # --- Output ---
     # ris_trends_data, saved as OUTPUT_ROOT/year=YYYY/month=MM/day=DD/ris_trends_data.csv (run date) + latest/.

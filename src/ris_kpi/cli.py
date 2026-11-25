@@ -54,9 +54,10 @@ def apply_scope(args):
     else:
         config.SILVER_SCOPE = None
         source = str(config.UPC_LIST_FILE) if config.CONSIDER_UPC_LIST else "CONSIDER_UPC_LIST off: every folder"
-    log.info("Settings: %s | RIS_KPI_STORAGE=%s | CONSIDER_UPC_LIST=%s | UPC_LIST_FILE=%s | DROP_ROWS_WITHOUT_IDS=%s",
+    log.info("Settings: %s | RIS_KPI_STORAGE=%s | CONSIDER_UPC_LIST=%s | UPC_LIST_FILE=%s | DROP_ROWS_WITHOUT_IDS=%s"
+             " | SURVEY_ID_FALLBACK=%s",
              config.ENV_FILE if config.ENV_FILE_FOUND else f"no {config.ENV_FILE} (defaults)", config.STORAGE,
-             config.CONSIDER_UPC_LIST, config.UPC_LIST_FILE, config.DROP_ROWS_WITHOUT_IDS)
+             config.CONSIDER_UPC_LIST, config.UPC_LIST_FILE, config.DROP_ROWS_WITHOUT_IDS, config.SURVEY_ID_FALLBACK)
     log.info("Paths: DB tables %s | silver %s | silver status -> %s | intermediate -> %s | KPI -> %s (+ /%s)",
              config.DB_TABLES_DIR, config.SILVER_INPUT_DIR, config.SILVER_STATUS_ROOT, config.INTERMEDIATE_ROOT,
              config.KPI_OUTPUT_ROOT, config.LATEST_FOLDER)

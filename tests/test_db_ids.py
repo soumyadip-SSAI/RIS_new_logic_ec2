@@ -11,8 +11,9 @@ DB = {
     "master_upc_project": pd.DataFrame({"id": ["11", "12"], "upc": ["N/1", "N_2"],
                                         "length_km": ["10.5", "x"], "lane_length_km": ["42", None]}),
     "master_survey_system": pd.DataFrame({"id": ["9"], "system_code": ["NSV"]}),
-    "survey_data_map": pd.DataFrame({"survey_schedule_id": ["s1", "s1-dup"], "upc": ["N/1", "N/1"],
-                                     "phase": ["1", "1"], "cycle": ["2.0", "2"], "survey_date": ["2026-01-05"] * 2}),
+    "survey_data_map": pd.DataFrame({"survey_schedule_id": ["s1", "s1"], "upc": ["N/1", "N/1"],
+                                     "phase": ["1", "1"], "cycle": ["2.0", "2"],
+                                     "survey_date": ["2026-01-05", "2026-02-01"]}),
     "master_defect_type": pd.DataFrame({
         "id": ["d-pot", "d-crack-rigid", "d-rut-flex"],
         "survey_system": ["NSV"] * 3,
@@ -43,7 +44,7 @@ def test_view_ids_fallback_and_dropped_rows():
     out = view_ids.drop_rows_without_ids(out)                              # N/2: no survey_data_map row
     assert out["upc"].tolist() == ["N/1"] * 4
     assert out["upc_id"].unique().tolist() == ["11"] and out["survey_source_id"].unique().tolist() == ["9"]
-    assert out["survey_id"].unique().tolist() == ["s1"]                    # duplicate key: first kept
+    assert out["survey_id"].unique().tolist() == ["s1"]                    # same id on two rows: one survey
     assert out["defect_type_id"].tolist()[:3] == ["d-pot", "d-crack-rigid", "d-rut-flex"]  # Rutting via fallback
     assert pd.isna(out["defect_type_id"].iloc[3])                          # Total: no defect type id
     assert out["id"].is_unique and str(uuid.UUID(out["id"].iloc[0])) == out["id"].iloc[0]
@@ -96,3 +97,62 @@ def test_survey_id_matched_on_upc_phase_cycle_only():
     assert pd.isna(out["survey_id"].iloc[3])                               # cycle 3: no survey_data_map row
     view = view_ids.add_db_ids(view_rows(("N/1", "Pothole", None)).assign(defect_detected_on="2026-07-07"), db)
     assert view["survey_id"].tolist() == ["s1"]
+
+
+# --- several survey_schedule_ids for one upc + phase + cycle (SURVEY_ID_FALLBACK) ------------------------------------
+
+MULTI_MAP = pd.DataFrame({
+    "survey_schedule_id": ["a1", "a2", "a3", "b1", "b2", "c1", "c2", "d1", "d2", "e1"],
+    "upc": ["N/A"] * 3 + ["N/B"] * 2 + ["N/C"] * 2 + ["N/D"] * 2 + ["N/E"],
+    "phase": ["1"] * 10, "cycle": ["1"] * 10, "survey_date": [None] * 10})
+WFM = pd.DataFrame({
+    "id": ["a1", "a2", "a3", "b1", "b2", "c1", "c2", "d1", "d2"],
+    "upc": ["N/A", "N/A", "N/X", "N/B", "N_B", "N/C", "N/C", "N/D", "N/D"],
+    "current_status": ["Validation in Progress", "Scheduled", "Survey Final Approved",   # a3: other UPC -> ignored
+                       "validation in progress", " Survey Final Approved ",           # b2 wins (case / spaces)
+                       "Scheduled", "Cancelled",                                       # c: no usable status
+                       "Survey Final Approved", "Survey Final Approved"]})             # d: two equal -> empty
+
+
+def lookup(fallback, wfm=WFM):
+    from ris_kpi.common.db_ids import survey_id_lookup
+    out = survey_id_lookup(MULTI_MAP, wfm, fallback)
+    return dict(zip(out["_upc"], out["survey_id"]))
+
+
+def test_several_ids_fallback_picks_by_wfm_status():
+    assert lookup(True) == {"N/E": "e1", "N/A": "a1", "N/B": "b2"}         # C (no status) and D (tie): no survey_id
+
+
+def test_several_ids_without_fallback_left_empty():
+    assert lookup(False) == {"N/E": "e1"}
+
+
+def test_several_ids_fallback_without_wfm_table():
+    assert lookup(True, wfm=None) == {"N/E": "e1"}
+
+
+def test_add_db_ids_uses_fallback_flag():
+    db = dict(DB, survey_data_map=MULTI_MAP, wfm_survey_schedule=WFM,
+              master_upc_project=pd.DataFrame({"id": ["u"], "upc": ["N/B"], "length_km": ["1"], "lane_length_km": ["4"]}))
+    rows = pd.DataFrame({"upc": ["N_B"], "phase": ["1.0"], "cycle": ["1"], "source_system": ["NSV"],
+                         "defect_detected_on": ["2026-01-05"]})
+    assert trends_ids.add_db_ids(rows, db, survey_id_fallback=True)["survey_id"].tolist() == ["b2"]
+    assert trends_ids.add_db_ids(rows, db, survey_id_fallback=False)["survey_id"].isna().all()
+    view = view_ids.add_db_ids(view_rows(("N/B", "Pothole", None)).assign(phase="1", cycle="1"), db, True)
+    assert view["survey_id"].tolist() == ["b2"]
+
+
+def test_wfm_table_loaded_only_with_fallback():
+    assert "wfm_survey_schedule" in view_ids.id_db_tables(True) and "wfm_survey_schedule" in trends_ids.id_db_tables(True)
+    assert "wfm_survey_schedule" not in view_ids.id_db_tables(False) + trends_ids.id_db_tables(False)
+
+
+def test_survey_id_fallback_setting_from_env(monkeypatch):
+    import subprocess, sys, os
+    for value, expected in (("False", "False"), ("True", "True"), ("", "True")):
+        env = dict(os.environ, SURVEY_ID_FALLBACK=value)
+        out = subprocess.run([sys.executable, "-c", "from ris_kpi import config as c; "
+                              "print(c.SURVEY_ID_FALLBACK, c.RisView.SURVEY_ID_FALLBACK, c.RisTrends.SURVEY_ID_FALLBACK)"],
+                             env=env, capture_output=True, text=True, check=True).stdout.split()
+        assert out == [expected] * 3

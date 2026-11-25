@@ -26,7 +26,7 @@ from ris_kpi.common.storage import latest_location, save_run
 from ris_kpi.config import RisTrends as cfg
 from ris_kpi.ris_trends.append import append_ris_trends_data, keep_new_surveys, load_existing
 from ris_kpi.ris_trends.categories import build_categories
-from ris_kpi.ris_trends.db_ids import ID_DB_TABLES, add_db_ids, drop_rows_without_ids
+from ris_kpi.ris_trends.db_ids import add_db_ids, drop_rows_without_ids, id_db_tables
 from ris_kpi.ris_trends.kpi_metrics import GRAIN, build_kpis, check_pci_sources
 from ris_kpi.ris_trends.loaders import filter_project_upcs, load_parent
 
@@ -65,7 +65,7 @@ def run_ris_trends(run_time=None):
         return output_path
 
     # --- 2. DB tables: UPC filter, DB ids ---
-    db_tables = load_db_tables(cfg.DB_TABLES_DIR, ID_DB_TABLES)
+    db_tables = load_db_tables(cfg.DB_TABLES_DIR, id_db_tables(cfg.SURVEY_ID_FALLBACK))
     tables = filter_project_upcs(tables, db_tables["master_upc_project"], cfg.FILTER_BY_PROJECT_MASTER)
     roughness, rutting, pci_source = (tables[cfg.ROUGHNESS_TABLE], tables[cfg.RUTTING_TABLE], tables[cfg.PCI_TABLE])
 
@@ -76,7 +76,8 @@ def run_ris_trends(run_time=None):
     rows = combine(kpis, categories)
 
     # --- 5. DB ids -> rows of the new surveys ---
-    created = drop_rows_without_ids(add_db_ids(rows, db_tables), drop=cfg.DROP_ROWS_WITHOUT_IDS)[FINAL_COLUMNS]
+    created = drop_rows_without_ids(add_db_ids(rows, db_tables, cfg.SURVEY_ID_FALLBACK),
+                                    drop=cfg.DROP_ROWS_WITHOUT_IDS)[FINAL_COLUMNS]
     log.info("ris_trends_data of the new surveys — %s rows × %s cols", f"{len(created):,}", created.shape[1])
 
     # --- 6. Appended to the saved ris_trends_data (created_at = updated_at = this run) -> run date + latest ---

@@ -3,7 +3,9 @@
     upc_id            master_upc_project    upc = upc                                                 -> id
     survey_source_id  master_survey_system  source_system ('NSV') = system_code                       -> id
     survey_id         survey_data_map       upc + phase + cycle = upc + phase + cycle                 -> survey_schedule_id
-                                            (survey_date / defect_detected_on not used)
+                                            (survey_date / defect_detected_on not used). Several ids for one
+                                            upc + phase + cycle: SURVEY_ID_FALLBACK (.env) -> wfm_survey_schedule
+                                            (common/db_ids.survey_id_lookup), else no survey_id
     defect_type_id    master_defect_type    source_system + asset_type + defect_name
                                             = survey_system + asset_type + defect_name                -> id
                       asset_type / defect_name from defect_type + pavement_type (defect_type_keys); Rutting: PAVEMENT,
@@ -21,6 +23,7 @@ import uuid
 import numpy as np
 import pandas as pd
 
+from ris_kpi.common.db_ids import SURVEY_ID_KEYS, survey_id_lookup
 from ris_kpi.common.keys import to_str_id as text_id, upc_slash
 
 log = logging.getLogger(__name__)
@@ -106,8 +109,14 @@ def _add_defect_type_id(df, master_defect_type):
     return df.drop(columns=["_asset_type", "_defect_name"])
 
 
-def add_db_ids(view, db_tables):
-    """view + upc_id / survey_source_id / survey_id / defect_type_id / id (uuid4 per row)."""
+def id_db_tables(survey_id_fallback):
+    """DB tables add_db_ids needs (wfm_survey_schedule only with SURVEY_ID_FALLBACK)."""
+    return ID_DB_TABLES + (["wfm_survey_schedule"] if survey_id_fallback else [])
+
+
+def add_db_ids(view, db_tables, survey_id_fallback=False):
+    """view + upc_id / survey_source_id / survey_id / defect_type_id / id (uuid4 per row).
+    survey_id_fallback: SURVEY_ID_FALLBACK (.env), see common/db_ids.survey_id_lookup."""
     master_upc_project, master_survey_system = db_tables["master_upc_project"], db_tables["master_survey_system"]
     survey_data_map, master_defect_type = db_tables["survey_data_map"], db_tables["master_defect_type"]
     df = view.copy()
@@ -125,16 +134,9 @@ def add_db_ids(view, db_tables):
                  .dropna(subset=["_src"]), ["_src"], "master_survey_system")
     df = _join(df, src, ["_src"], "survey_source_id", ["source_system"])
 
-    # survey_id on upc + phase + cycle (no date); the same survey_schedule_id on several rows is one survey, a
-    # different survey_schedule_id for the same upc + phase + cycle is logged and the first one kept
-    keys = ["_upc", "_phase", "_cycle"]
-    survey = _dedup(pd.DataFrame({
-        "_upc": upc_slash(survey_data_map["upc"]),
-        "_phase": text_id(survey_data_map["phase"]),
-        "_cycle": text_id(survey_data_map["cycle"]),
-        "survey_id": survey_data_map["survey_schedule_id"],
-    }).dropna(subset=keys + ["survey_id"]).drop_duplicates(), keys, "survey_data_map")
-    df = _join(df, survey, keys, "survey_id", SURVEY_COLS)
+    # survey_id on upc + phase + cycle (no date); several ids -> SURVEY_ID_FALLBACK (common/db_ids.py)
+    survey = survey_id_lookup(survey_data_map, db_tables.get("wfm_survey_schedule"), survey_id_fallback)
+    df = _join(df, survey, SURVEY_ID_KEYS, "survey_id", SURVEY_COLS)
 
     df = _add_defect_type_id(df, master_defect_type)
 

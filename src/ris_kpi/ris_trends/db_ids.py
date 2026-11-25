@@ -3,7 +3,9 @@
     upc_id            master_upc_project    upc = upc                                                 -> id
     survey_source_id  master_survey_system  source_system ('NSV') = system_code                       -> id
     survey_id         survey_data_map       upc + phase + cycle = upc + phase + cycle                 -> survey_schedule_id
-                                            (survey_date / defect_detected_on not used)
+                                            (survey_date / defect_detected_on not used). Several ids for one
+                                            upc + phase + cycle: SURVEY_ID_FALLBACK (.env) -> wfm_survey_schedule
+                                            (common/db_ids.survey_id_lookup), else no survey_id
     id                random uuid4 per row (set when the survey's rows are appended)
 created_at / updated_at are set when the rows are appended (ris_trends/append.py).
 
@@ -15,6 +17,7 @@ import uuid
 
 import pandas as pd
 
+from ris_kpi.common.db_ids import SURVEY_ID_KEYS, survey_id_lookup
 from ris_kpi.common.keys import to_str_id as text_id, upc_slash
 
 log = logging.getLogger(__name__)
@@ -44,8 +47,14 @@ def _join(df, lookup, keys, id_col, label_cols):
     return out
 
 
-def add_db_ids(df, db_tables):
-    """df + upc_id / survey_source_id / survey_id / id (uuid4 per row)."""
+def id_db_tables(survey_id_fallback):
+    """DB tables add_db_ids needs (wfm_survey_schedule only with SURVEY_ID_FALLBACK)."""
+    return ID_DB_TABLES + (["wfm_survey_schedule"] if survey_id_fallback else [])
+
+
+def add_db_ids(df, db_tables, survey_id_fallback=False):
+    """df + upc_id / survey_source_id / survey_id / id (uuid4 per row).
+    survey_id_fallback: SURVEY_ID_FALLBACK (.env), see common/db_ids.survey_id_lookup."""
     upc_table, survey_system_table = db_tables["master_upc_project"], db_tables["master_survey_system"]
     survey_map_table = db_tables["survey_data_map"]
     df = df.copy()
@@ -64,16 +73,9 @@ def add_db_ids(df, db_tables):
                  .dropna(subset=["_src"]), ["_src"], "master_survey_system")
     df = _join(df, src, ["_src"], "survey_source_id", ["source_system"])
 
-    # survey_id on upc + phase + cycle (no date); the same survey_schedule_id on several rows is one survey, a
-    # different survey_schedule_id for the same upc + phase + cycle is logged and the first one kept
-    keys = ["_upc", "_phase", "_cycle"]
-    survey = _dedup(pd.DataFrame({
-        "_upc": upc_slash(survey_map_table["upc"]),
-        "_phase": text_id(survey_map_table["phase"]),
-        "_cycle": text_id(survey_map_table["cycle"]),
-        "survey_id": survey_map_table["survey_schedule_id"],
-    }).dropna(subset=keys + ["survey_id"]).drop_duplicates(), keys, "survey_data_map")
-    df = _join(df, survey, keys, "survey_id", SURVEY_KEYS)
+    # survey_id on upc + phase + cycle (no date); several ids -> SURVEY_ID_FALLBACK (common/db_ids.py)
+    survey = survey_id_lookup(survey_map_table, db_tables.get("wfm_survey_schedule"), survey_id_fallback)
+    df = _join(df, survey, SURVEY_ID_KEYS, "survey_id", SURVEY_KEYS)
 
     df["id"] = [str(uuid.uuid4()) for _ in range(len(df))]
     return df.drop(columns=["_upc", "_src", "_phase", "_cycle"])

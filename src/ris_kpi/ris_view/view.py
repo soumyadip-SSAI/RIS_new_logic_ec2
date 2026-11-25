@@ -22,7 +22,7 @@ from ris_kpi import config
 from ris_kpi.common.db_tables import load_db_tables
 from ris_kpi.common.storage import as_text, load_latest, save_run
 from ris_kpi.config import RisView as cfg
-from ris_kpi.ris_view.db_ids import ID_DB_TABLES, add_db_ids, drop_rows_without_ids, finalize
+from ris_kpi.ris_view.db_ids import add_db_ids, drop_rows_without_ids, finalize, id_db_tables
 from ris_kpi.ris_view.incremental import (INSERT, RIS_VIEW_KEY, RIS_VIEW_UPDATE, SILVER_SURVEY, UPDATE,
                                           insert_surveys, keep_surveys, update_rows)
 from ris_kpi.ris_view.loaders import load_intermediate, load_status_table
@@ -52,7 +52,7 @@ def run(mode=UPDATE, surveys=None, run_time=None):
               for defect, name in COUNT_TABLES.items()}
     intermediate = keep_surveys(load_intermediate(cfg.INTERMEDIATE_ROOT, cfg.INTERMEDIATE_NAME), surveys,
                                 SILVER_SURVEY)
-    db_tables = load_db_tables(cfg.DB_TABLES_DIR, ID_DB_TABLES)
+    db_tables = load_db_tables(cfg.DB_TABLES_DIR, id_db_tables(cfg.SURVEY_ID_FALLBACK))
     project = load_project_master(db_tables["master_upc_project"])
 
     # --- 2. Keep only UPCs in master_upc_project ---
@@ -64,7 +64,7 @@ def run(mode=UPDATE, surveys=None, run_time=None):
     rows = build_view(tables, intermediate, project)
 
     # --- 4. DB ids ---
-    rows = drop_rows_without_ids(add_db_ids(rows, db_tables), drop=cfg.DROP_ROWS_WITHOUT_IDS)
+    rows = drop_rows_without_ids(add_db_ids(rows, db_tables, cfg.SURVEY_ID_FALLBACK), drop=cfg.DROP_ROWS_WITHOUT_IDS)
     fresh = as_text(finalize(rows.assign(created_at=run_time, updated_at=run_time)))
     log.info("ris_view_data of this run — %s rows × %s cols", f"{len(fresh):,}", fresh.shape[1])
 
