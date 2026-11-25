@@ -154,7 +154,7 @@ ris-kpi sync-db-ids              # copy them and save
 ### 1. Silver status (`ris_view/status.py`)
 - **Lookup:**
   1. Filter `udm_defect_reference` to the table's `defect_collection` (`RisView.STATUS_TABLES`).
-  2. Match the silver **`id`** (`RisView.STATUS_KEY`) to `udm_defect_reference.defect_id`. The matched row's `id` becomes `defect_reference_id`.
+  2. Match the silver **`display_defect_id`** (`RisView.STATUS_KEY`) to `udm_defect_reference.defect_id`, within the table's `defect_collection`. Keys are compared as trimmed text (`123.0` = `123`). The matched row's `id` becomes `defect_reference_id`. The silver `id` is kept as it is and still links the 10m, CA and parent rows.
   3. Match `defect_reference_id` to `dlm_defect_case.defect_reference_id`, which gives `current_status`.
 - **`final_status`:** `Closed` for CLOSED / CANCELLED, else `Open`, including when there is no case.
 - **Duplicate keys** on the DB side stop the run (`ValueError`).

@@ -1,7 +1,8 @@
 """defect_reference_id / current_status / final_status for the silver status tables (RisView.STATUS_TABLES).
 
-  1) defect_reference_id: <table>.<STATUS_KEY> (id) = udm_defect_reference.defect_id, for that table's
-                          defect_collection -> udm_defect_reference.id
+  1) defect_reference_id: <table>.<STATUS_KEY> (display_defect_id) = udm_defect_reference.defect_id, for that
+                          table's defect_collection -> udm_defect_reference.id   (keys compared as trimmed text,
+                          '123.0' = '123')
   2) current_status:      defect_reference_id = dlm_defect_case.defect_reference_id -> current_status
   3) final_status:        'Closed' if current_status is CLOSED / CANCELLED, 'Open' for any other status and when there
                           is no current_status (no DB case = not closed), so it is never null
@@ -29,13 +30,19 @@ def _unique(df, key, label):
     return df
 
 
+def match_key(series):
+    """Join key as trimmed text; a number read as float ('123.0') matches its text form ('123'); empty = null."""
+    return (series.astype("string").str.strip().str.replace(r"^(-?\d+)\.0+$", r"\1", regex=True)
+            .replace("", pd.NA))
+
+
 def reference_map(udm_defect_reference, defect_collection):
     """udm_defect_reference.defect_id (as "_key") -> defect_reference_id for one defect_collection."""
     ref = udm_defect_reference.loc[udm_defect_reference["defect_collection"] == defect_collection,
                                    ["defect_id", "id"]]
-    ref = ref.dropna(subset=["defect_id"]).rename(columns={"defect_id": "_key", "id": "defect_reference_id"})
-    ref["_key"] = ref["_key"].astype("string")
-    return _unique(ref, "_key", f"udm_defect_reference[{defect_collection}]")
+    ref = ref.rename(columns={"defect_id": "_key", "id": "defect_reference_id"})
+    ref["_key"] = match_key(ref["_key"])
+    return _unique(ref.dropna(subset=["_key"]), "_key", f"udm_defect_reference[{defect_collection}]")
 
 
 def case_status(dlm_defect_case):
@@ -60,9 +67,13 @@ def _with_status(silver, status):
 
 
 def add_status(silver, defect_collection, udm_defect_reference, cases, silver_key="id"):
-    """silver + defect_reference_id / current_status / final_status (rows whose silver_key is null get no status)."""
+    """silver + defect_reference_id / current_status / final_status (rows whose silver_key is null get no status).
+    silver_key: the silver column matched to udm_defect_reference.defect_id (RisView.STATUS_KEY)."""
+    if silver_key not in silver.columns:
+        raise KeyError(f"{defect_collection}: the silver table has no {silver_key} column (RisView.STATUS_KEY), "
+                       f"needed to match udm_defect_reference.defect_id")
     ref = reference_map(udm_defect_reference, defect_collection)
-    keys = pd.DataFrame({"_key": silver[silver_key].astype("string")})
+    keys = pd.DataFrame({"_key": match_key(silver[silver_key])})
     keys = keys.merge(ref, on="_key", how="left", validate="many_to_one")
     keys = keys.merge(cases, on="defect_reference_id", how="left", validate="many_to_one")
     keys["final_status"] = final_status(keys["current_status"])

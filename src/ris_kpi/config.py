@@ -149,8 +149,8 @@ class RisView:
         POTHOLE_TABLE: "pothole_child_ca",
         CRACKING_TABLES["ca"]: "cracking_child_ca",
     }
-    # Silver column matched to udm_defect_reference.defect_id (every status table)
-    STATUS_KEY = "id"
+    # Silver column matched to udm_defect_reference.defect_id (every status table; within the table's defect_collection)
+    STATUS_KEY = "display_defect_id"
 
     # --- ris_view_data ---
     # True = rows with an empty upc_id / survey_id / survey_source_id are dropped (logged); from .env
